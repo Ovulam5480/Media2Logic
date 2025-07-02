@@ -1,9 +1,11 @@
 {
-    "displayName": "Mod Template",
-    "description": "Mindustry Java mod template, complete with EntityAnno and syntax downgrader integration.",
-    "version": "v1.0",
-    "minGameVersion": "146",
-    "author": "You",
+    "displayName": "Media2Logic",
+    "name": "mod",
+    "description": "图片转逻辑模组(WIP)",
+    "version": "0.1",
+    "minGameVersion": "149",
+    "author": "Ovulam5480",
     "java": true,
-    "main": "template.ModTemplate"
+    "main": "Media2Logic.Media2LogicMod",
+    "hidden": true
 }
