@@ -57,8 +57,6 @@ public class LogicImageDialog extends BaseDialog {
     Pixmap image = new Pixmap(180,180);
     Pixmap afterScaling = new Pixmap(0,0);
     Pixmap afterCompressor = new Pixmap(0,0);
-    //Pixmap image = PixmapIO.readPNG(Vars.dataDirectory.child("mods").child("batch-factory-icon.png"));
-    //Pixmap image = PixmapIO.readPNG(Vars.dataDirectory.child("mods").child("image.png"));
     Compressor compressor = Compressor.quadtree;
     ScalingAlgorithm algorithm = ScalingAlgorithm.nearest;
     String name = "name";
@@ -143,26 +141,25 @@ public class LogicImageDialog extends BaseDialog {
 
         Intp maxAmount = () -> Mathf.ceil(((int)logicBlock.range - logicBlock.size * 8 / 2f) / (logicDisplay.size * 8)) * 2;
 
-        list.add(new DynamicLimitSliderSetting("逻辑画板宽高数", 1,
+        list.add(new DynamicLimitSliderSetting("逻辑画板宽数", 1,
                 () -> 1,
                 () -> heightAmount > maxAmount.get() ? Mathf.clamp(maxAmount.get(), 1, 32) : 32,
                 1,
                 i -> {
                     widthAmount = i;
+                    scaling();
+                    return "" + i;
+        }));
+
+        list.add(new DynamicLimitSliderSetting("逻辑画板高数", 1,
+                () -> 1,
+                () -> widthAmount > maxAmount.get() ? Mathf.clamp(maxAmount.get(), 1, 32) : 32,
+                1,
+                i -> {
                     heightAmount = i;
                     scaling();
                     return "" + i;
         }));
-//
-//        list.add(new DynamicLimitSliderSetting("逻辑画板高数", 1,
-//                () -> 1,
-//                () -> widthAmount > maxAmount.get() ? Mathf.clamp(maxAmount.get(), 1, 32) : 32,
-//                1,
-//                i -> {
-//                    heightAmount = i;
-//                    scaling();
-//                    return "" + i;
-//        }));
 
         list.add(new ToggleCheckSetting("生成并保存", () -> {
             scaling();

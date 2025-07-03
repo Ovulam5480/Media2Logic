@@ -66,9 +66,12 @@ public class Compressors {
         for (int i = 0; i < minSideAmount; i++) {
             int midden = (minSideAmount - 1) / 2;
             boolean rightTop = i > midden;
-            int displayGridY = rightTop ? midden - i + minSideAmount : i;
+            int shorter = rightTop ? midden - i + minSideAmount : i;
 
-            for (int displayGridX : dxseq.toArray()) {
+            for (int longer : dxseq.toArray()) {
+                int displayGridX = isLandscape ? longer : shorter;
+                int displayGridY = isLandscape ? shorter : longer;
+
                 Seq<String> codes = codesGrid.get(displayGridX, displayGridY);
 
                 if (codes == null) {
@@ -407,23 +410,27 @@ public class Compressors {
 
     public static Pixmap[][] splitPixmap(Pixmap pixmap, int displaySize, int widthAmount, int heightAmount) {
         Pixmap[][] result = new Pixmap[widthAmount][heightAmount];
+        Log.info("width " + pixmap.width + " height " + pixmap.height);
 
         for (int gridX = 0; gridX < widthAmount; gridX++) {
             for (int gridY = 0; gridY < heightAmount; gridY++) {
                 Pixmap tile = new Pixmap(displaySize, displaySize);
 
-                int startY = gridY * displaySize;
                 int startX = gridX * displaySize;
+                int startY = gridY * displaySize;
 
                 for (int y = 0; y < displaySize; y++) {
                     for (int x = 0; x < displaySize; x++) {
                         int srcX = startX + x;
                         int srcY = startY + y;
 
-                        if (srcY < pixmap.width && srcX < pixmap.height) {
+                        if (srcX < pixmap.width && srcY < pixmap.height) {
                             tile.set(x, y, pixmap.get(srcX, srcY));
                         }
-                        //else tile.set(x, y, Color.clear);
+                        else {
+                            Log.info("x " + srcX + " y " + srcY);
+                            tile.set(x, y, Color.red);
+                        }
                     }
                 }
 
