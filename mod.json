@@ -2,7 +2,7 @@
     "displayName": "Media2Logic",
     "name": "mod",
     "description": "图片转逻辑模组, 图片只支持png格式 \n蓝图生成完成后请及时重启游戏, 释放内存",
-    "version": "0.2",
+    "version": "0.2.2",
     "minGameVersion": "149",
     "author": "Ovulam5480",
     "java": true,

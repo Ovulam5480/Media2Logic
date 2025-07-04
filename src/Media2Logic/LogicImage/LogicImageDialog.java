@@ -177,6 +177,8 @@ public class LogicImageDialog extends BaseDialog {
             schematics.show();
         }));
 
+        settingsTable.rebuild();
+
         addCloseButton();
     }
 
