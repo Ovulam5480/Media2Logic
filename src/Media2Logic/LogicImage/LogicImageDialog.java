@@ -235,20 +235,46 @@ public class LogicImageDialog extends BaseDialog {
     void refreshReviewImage(){
         reviewTable.clear();
 
-        addImage(image, reviewTable);
-        addImage(afterScaling, reviewTable);
-        addImage(afterCompressor, reviewTable);
-
         int before = afterScaling.width * afterScaling.height;
         int after = Compressors.rectSize();
+
+        if(Vars.mobile){
+            Table imageTable = new Table();
+            ScrollPane pane = new ScrollPane(imageTable);
+            pane.setOverscroll(false, false);
+            pane.setScrollingDisabled(true, false);
+            reviewTable.add(pane);
+
+            addImage(image, imageTable);
+            imageTable.row();
+
+            addImage(afterScaling, imageTable);
+            imageTable.add(before + "");
+            imageTable.row();
+
+            addImage(afterCompressor, imageTable);
+            imageTable.add(after + "(" + String.format("%.2f", after * 100f / before) + "%)");
+        }else {
+            addImage(image, reviewTable);
+            addImage(afterScaling, reviewTable);
+            addImage(afterCompressor, reviewTable);
+        }
+
         reviewTable.row();
         reviewTable.button("选择图片", () -> Vars.platform.showFileChooser(true, "png", f -> {
             image.dispose();
-            image = PixmapIO.readPNG(f);
+            try {
+                image = PixmapIO.readPNG(f);
+            } catch (Exception e) {
+                ui.showErrorMessage("无法读取文件");
+            }
             scaling();
         }));
-        reviewTable.add(before + "");
-        reviewTable.add(after + "(" + String.format("%.2f", after * 100f / before) + "%)");
+
+        if(Vars.mobile) {
+            reviewTable.add(before + "");
+            reviewTable.add(after + "(" + String.format("%.2f", after * 100f / before) + "%)");
+        }
     }
 
     void addImage(Pixmap pixmap, Table table){
