@@ -41,6 +41,8 @@ public class LogicImageDialog extends BaseDialog {
     int widthAmount = 1, heightAmount = 1;
     boolean minScale = false;
     boolean showGrid = false;
+    boolean limit = false;
+    boolean stopCompress = false;
     
     float imageSize = 300f;
 
@@ -64,6 +66,11 @@ public class LogicImageDialog extends BaseDialog {
         Seq<Setting> list = settingsTable.getSettings();
 
         list.add(new NotSavedSetting("逻辑图像名称", "", () -> name,s -> name = s));
+
+        list.add(new NotSavedCheckSetting("禁用色块预览图更新", false, () -> stopCompress, b -> {
+            stopCompress = b;
+            if(!b)scaling();
+        }));
 
         list.add(new NotSavedCheckSetting("比例缩放", true, () -> minScale, b -> {
             minScale = b;
@@ -135,11 +142,15 @@ public class LogicImageDialog extends BaseDialog {
                 }
         ));
 
-        Intp maxAmount = () -> Mathf.ceil(((int)logicBlock.range - logicBlock.size * 8 / 2f) / (logicDisplay.size * 8)) * 2;
+        list.add(new NotSavedCheckSetting("允许某边过长", false, () -> limit, b -> {
+            limit = b;
+        }));
+
+        Intp maxAmount = () -> Mathf.clamp(Mathf.ceil(((int)logicBlock.range - logicBlock.size * 8 / 2f) / (logicDisplay.size * 8)) * 2, 1, 32);
 
         list.add(new DynamicLimitSliderSetting("逻辑画板宽数", 1,
                 () -> 1,
-                () -> heightAmount > maxAmount.get() ? Mathf.clamp(maxAmount.get(), 1, 32) : 32,
+                () -> heightAmount > maxAmount.get() ? maxAmount.get() : limit ? 32 : maxAmount.get(),
                 1,
                 i -> {
                     widthAmount = i;
@@ -149,7 +160,7 @@ public class LogicImageDialog extends BaseDialog {
 
         list.add(new DynamicLimitSliderSetting("逻辑画板高数", 1,
                 () -> 1,
-                () -> widthAmount > maxAmount.get() ? Mathf.clamp(maxAmount.get(), 1, 32) : 32,
+                () -> widthAmount > maxAmount.get() ? maxAmount.get() : limit ? 32 : maxAmount.get(),
                 1,
                 i -> {
                     heightAmount = i;
@@ -190,10 +201,10 @@ public class LogicImageDialog extends BaseDialog {
         if(algorithm == ScalingAlgorithm.nearest) Scaler.nearestNeighbor(image, afterScaling);
         else if(algorithm == ScalingAlgorithm.bilinear) Scaler.bilinearInterpolation(image, afterScaling);
 
-        compressPixmap(afterScaling, compressor);
-
-        afterCompressor = Compressors.decompressor();
-
+        if(!stopCompress) {
+            compressPixmap(afterScaling, compressor);
+            afterCompressor = Compressors.decompressor();
+        }
 //        if(showGrid) {
 //            gridImage(afterScaling);
 //            //gridImage(afterCompressor);
