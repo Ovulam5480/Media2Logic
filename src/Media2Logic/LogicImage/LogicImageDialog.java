@@ -271,7 +271,7 @@ public class LogicImageDialog extends BaseDialog {
             scaling();
         }));
 
-        if(Vars.mobile) {
+        if(!Vars.mobile) {
             reviewTable.add(before + "");
             reviewTable.add(after + "(" + String.format("%.2f", after * 100f / before) + "%)");
         }
