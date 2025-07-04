@@ -3,24 +3,22 @@ package Media2Logic.LogicImage;
 import arc.graphics.Color;
 import arc.graphics.Pixmap;
 import arc.math.Mathf;
-import arc.math.geom.Point2;
 import arc.math.geom.Vec2;
-import arc.struct.GridBits;
-import arc.struct.GridMap;
-import arc.struct.IntSeq;
-import arc.struct.Seq;
+import arc.struct.*;
 import arc.util.Log;
 import arc.util.Tmp;
 import arc.util.pooling.Pools;
 import mindustry.Vars;
 import mindustry.content.Blocks;
 import mindustry.game.Schematic;
-import mindustry.logic.LAssembler;
-import mindustry.logic.LExecutor;
-import mindustry.logic.LVar;
+import mindustry.game.Schematics;
 import mindustry.world.Block;
 import mindustry.world.blocks.logic.LogicBlock;
 import mindustry.world.blocks.logic.LogicDisplay;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 
 //todo 透明像素的处理
@@ -31,8 +29,11 @@ public class Compressors {
     public static float tolerance;
     private static Pixmap pixmap = new Pixmap(0, 0);
     private static Pixmap flip = new Pixmap(0, 0);
+    
+    private static final int veryBig = 99999;
+    static SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.getDefault());
 
-    public static void compressor(LogicDisplay display, LogicBlock logic, int widthAmount, int heightAmount, LogicImageDialog.Compressor compressor) {
+    public static void compressor(LogicDisplay display, LogicBlock logic, int widthAmount, int heightAmount, LogicImageDialog.Compressor compressor, String name) {
         int minSideAmount = Math.min(widthAmount, heightAmount);
         int maxSideAmount = Math.max(widthAmount, heightAmount);
         boolean isLandscape = widthAmount >= heightAmount;
@@ -44,17 +45,17 @@ public class Compressors {
         for (int i = 0; i < widthAmount; i++) {
             for (int j = 0; j < heightAmount; j++) {
                 LogicImageDialog.compressPixmap(pixmapGrid[i][j], compressor);
-                codesGrid.put(i, j, rectToCodes());
+                codesGrid.put(isLandscape ? i : heightAmount - 1 - j, isLandscape ? j : i, rectToCodes());
             }
         }
 
         GridMap<DisplayConfig> codeGrid = new GridMap<>();
 
-        int logicWidth = Mathf.ceil((float) maxSideAmount * display.size / logic.size);
-        int logicHeight = logic.range > 80000 ? 10000 : Mathf.ceil(logic.range / 8 / logic.size - 1 / 2f);
+        int logicWidthAmount = Mathf.ceil((float) maxSideAmount * display.size / logic.size);
+        int logicHeightAmount = logic.range > veryBig ? veryBig : Mathf.ceil(logic.range / 8 / logic.size - 1 / 2f);
 
         IntSeq lxseq = new IntSeq();
-        for (int i = 0; i < logicWidth; i++) {
+        for (int i = 0; i < logicWidthAmount; i++) {
             lxseq.add(i);
         }
 
@@ -66,23 +67,14 @@ public class Compressors {
         for (int i = 0; i < minSideAmount; i++) {
             int midden = (minSideAmount - 1) / 2;
             boolean rightTop = i > midden;
-            int shorter = rightTop ? midden - i + minSideAmount : i;
+            int displayGridY = rightTop ? midden - i + minSideAmount : i;
 
-            for (int longer : dxseq.toArray()) {
-                int displayGridX = isLandscape ? longer : shorter;
-                int displayGridY = isLandscape ? shorter : longer;
-
+            for (int displayGridX : dxseq.toArray()) {
                 Seq<String> codes = codesGrid.get(displayGridX, displayGridY);
 
-                if (codes == null) {
-                    throw new RuntimeException("啊啊啊啊啊啊啊啊啊啊");
-                } else if (codes.isEmpty()) {
-                    continue;
-                }
-
                 loop:
-                for (int j = 0; j < logicHeight; j++) {
-                    int logicGridY = rightTop ? logicHeight - 1 - j : j - logicHeight;
+                for (int j = 0; j < logicHeightAmount; j++) {
+                    int logicGridY = rightTop ? logicHeightAmount - 1 - j : j - logicHeightAmount;
                     for (int logicGridX : lxseq.toArray()) {
                         if (!validLink(logic, display, displayGridX, displayGridY, logicGridX, logicGridY, displayShorter)) {
                             continue;
@@ -99,102 +91,126 @@ public class Compressors {
                     lxseq.reverse();
                 }
 
+                dxseq.reverse();
+
                 if (!codes.isEmpty()) {
                     Vars.ui.showErrorMessage("无法放置足够的逻辑, 请适量增加容差");
                     return;
                 }
-                dxseq.reverse();
             }
         }
 
-        int[] maxDeep = {1, 1};
+        int[] maxDeep = {0, 0};
         boolean[] booleans = {true, false};
 
         GridMap<byte[]> configGrid = new GridMap<>();
         for (boolean isPositive : booleans) {
-            for (int x = 0; x < logicWidth; x++) {
+            for (int x = 0; x < logicWidthAmount; x++) {
                 int nonNull = isPositive ? 0 : -1;
-                for (int j = 0; j < logicHeight; j++) {
+                for (int j = 0; j < logicHeightAmount; j++) {
                     DisplayConfig displayConfig = codeGrid.get(x, isPositive ? j : -(j + 1));
                     if (displayConfig != null) {
                         int y = isPositive ? nonNull++ : nonNull--;
-                        byte[] config = getConfig(logic, display,
+                        byte[] config = logicConfig(logic, display,
                                 displayConfig.displayX, (minSideAmount - 1 - displayConfig.displayY), x, -(y + 1),
-                                displayShorter, isLandscape, displayConfig.code);
+                                displayShorter, displayConfig.code);
                         configGrid.put(x, -(y + 1), config);
                     }
                 }
                 if (isPositive) {
                     maxDeep[1] = Math.max(maxDeep[1], nonNull);
                 } else {
-                    maxDeep[0] = Math.max(maxDeep[0], -nonNull);
+                    maxDeep[0] = Math.max(maxDeep[0], -nonNull-1);
                 }
             }
         }
 
         Seq<Schematic.Stile> stiles = new Seq<>();
 
-        for (int i = 0; i < widthAmount; i++) {
-            for (int j = 0; j < heightAmount; j++) {
-                Vec2 displayVec = getDisplayVec(i, j, display.size, Tmp.v1);
-                int vecX = (int) displayVec.x;
-                int vecY = (int) displayVec.y + maxDeep[0] * logic.size;
+        for (int i = 0; i < maxSideAmount; i++) {
+            for (int j = 0; j < minSideAmount; j++) {
+                Vec2 displayTile = getDisplayTile(display.size, i, j, Tmp.v1);
+                int TileX = (int) displayTile.x;
+                int TileY = (int) displayTile.y + maxDeep[0] * logic.size;
 
-                stiles.add(new Schematic.Stile(display, vecX, vecY, null, (byte) 0));
+                stiles.add(new Schematic.Stile(display, TileX, TileY, null, (byte) 0));
             }
         }
 
-        for (int i = -logicWidth; i < logicWidth; i++) {
-            for (int j = -logicHeight; j < logicHeight; j++) {
+        for (int i = -logicWidthAmount; i < logicWidthAmount; i++) {
+            for (int j = -logicHeightAmount; j < logicHeightAmount; j++) {
                 byte[] bytes = configGrid.get(i, j);
                 if (bytes == null) continue;
 
-                Vec2 logicVec = getLogicVec(i, j, logic.size, Tmp.v1, displayShorter);
-                int vecX = Mathf.floor(logicVec.x);
-                int vecY = Mathf.floor(logicVec.y + maxDeep[0] * logic.size);
+                Vec2 logicTile = getLogicTile(logic.size, i, j, Tmp.v1, displayShorter);
+                int TileX = Mathf.floor(logicTile.x);
+                int TileY = Mathf.floor(logicTile.y + maxDeep[0] * logic.size);
 
-                stiles.add(new Schematic.Stile(logic, vecX, vecY, bytes, (byte) 0));
+                stiles.add(new Schematic.Stile(logic, TileX, TileY, bytes, (byte) 0));
             }
         }
 
+        StringMap stringMap = new StringMap();
+        stringMap.put("name", name != null ? name : sdf.format(new Date()));
+
         Schematic schematic = new Schematic(stiles,
-                Vars.schematics.all().first().tags,
-                widthAmount * display.size,
-                heightAmount * display.size + (maxDeep[0] + maxDeep[1]) * logic.size);
+                null,
+                maxSideAmount * display.size,
+                minSideAmount * display.size + (maxDeep[0] + maxDeep[1]) * logic.size);
+
+        if(!isLandscape){
+            schematic = Schematics.rotate(schematic, 1);
+        }
+
+        align(schematic);
+        schematic.tags = stringMap;
 
         Vars.schematics.add(schematic);
     }
 
-    public static byte[] getConfig(LogicBlock logic, Block display,
-                                   int displayGridX, int displayGridY, int logicGridX, int logicGridY,
-                                   int displayShorter, boolean isLandSpace, String code) {
-        Vec2 displayVec = getDisplayVec(displayGridX, displayGridY, display.size, Tmp.v1);
-        Vec2 logicVec = getLogicVec(logicGridX, logicGridY, logic.size, Tmp.v2, displayShorter);
+    public static byte[] logicConfig(LogicBlock logic, Block display,
+                                     int displayGridX, int displayGridY, int logicGridX, int logicGridY,
+                                     int displayShorter, String code) {
+        Vec2 displayTile = getDisplayTile(display.size, displayGridX, displayGridY, Tmp.v1);
+        Vec2 logicTile = getLogicTile(logic.size, logicGridX, logicGridY, Tmp.v2, displayShorter);
 
-        Vec2 diff = Tmp.v3.set(displayVec).sub(logicVec);
+        Vec2 diff = Tmp.v3.set(displayTile).sub(logicTile);
 
         LogicBlock.LogicLink link = new LogicBlock.LogicLink((int) diff.x, (int) diff.y, "display1", true);
         return LogicBlock.compress(code, Seq.with(link));
     }
 
+    public static void align(Schematic schematic){
+        int[] deep = {veryBig,veryBig};
+        Seq<Schematic.Stile> tiles = schematic.tiles;
+        tiles.each(t -> {
+            int radius = (t.block.size - 1) / 2;
+            deep[0] = Math.min(deep[0], t.x - radius);
+            deep[1] = Math.min(deep[1], t.y - radius);
+        });
+
+        tiles.each(t -> {
+            t.x -= (short) deep[0];
+            t.y -= (short) deep[1];
+        });
+    }
 
     public static boolean validLink(LogicBlock logic, Block display,
                                     int displayGridX, int displayGridY, int logicGridX, int logicGridY,
                                     int displayShorter) {
-        if(logic.range > 80000)return true;
-        Vec2 displayVec = getDisplayVec(displayGridX, displayGridY, display.size, Tmp.v1);
-        Vec2 logicVec = getLogicVec(logicGridX, logicGridY, logic.size, Tmp.v2, displayShorter);
+        if(logic.range > veryBig)return true;
+        Vec2 displayTile = getDisplayTile(display.size, displayGridX, displayGridY, Tmp.v1);
+        Vec2 logicTile = getLogicTile(logic.size, logicGridX, logicGridY, Tmp.v2, displayShorter);
 
-        return displayVec.within(logicVec, logic.range / 8 + display.size / 2f);
+        return displayTile.within(logicTile, logic.range / 8 + display.size / 2f);
     }
 
-    public static Vec2 getDisplayVec(int displayGridX, int displayGridY, int size, Vec2 input) {
+    public static Vec2 getDisplayTile(int size, int displayGridX, int displayGridY, Vec2 input) {
         int offset = (size + 1) % 2;
         return input.set(displayGridX + 0.5f, displayGridY + 0.5f).scl(size).sub(offset, offset);
     }
 
-    public static Vec2 getLogicVec(int logicGridX, int logicGridY, int size, Vec2 input, int displayShorter) {
-        //todo add offset ???
+    public static Vec2 getLogicTile(int size, int logicGridX, int logicGridY, Vec2 input, int displayShorter) {
         int offset = (size + 1) % 2;
         input.set(logicGridX + 0.5f, logicGridY + 0.5f).scl(size).sub(offset, offset);
         if (logicGridY >= 0) {
@@ -410,7 +426,6 @@ public class Compressors {
 
     public static Pixmap[][] splitPixmap(Pixmap pixmap, int displaySize, int widthAmount, int heightAmount) {
         Pixmap[][] result = new Pixmap[widthAmount][heightAmount];
-        Log.info("width " + pixmap.width + " height " + pixmap.height);
 
         for (int gridX = 0; gridX < widthAmount; gridX++) {
             for (int gridY = 0; gridY < heightAmount; gridY++) {

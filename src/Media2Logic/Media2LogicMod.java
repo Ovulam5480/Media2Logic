@@ -1,6 +1,7 @@
 package Media2Logic;
 
 import Media2Logic.LogicImage.LogicImageDialog;
+import arc.util.Log;
 import mindustry.*;
 import mindustry.gen.*;
 import mindustry.mod.*;
