@@ -1,4 +1,4 @@
-package Media2Logic.LogicImage;
+package Media2Logic.LogicImage.ImageToLogic;
 
 import arc.graphics.Pixmap;
 

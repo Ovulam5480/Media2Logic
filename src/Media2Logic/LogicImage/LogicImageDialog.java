@@ -1,24 +1,28 @@
 package Media2Logic.LogicImage;
 
+import Media2Logic.LogicImage.ImageToLogic.Compressors;
+import Media2Logic.LogicImage.ImageToLogic.Scaler;
 import arc.Core;
 import arc.func.*;
 import arc.graphics.*;
 import arc.graphics.g2d.TextureRegion;
+import arc.input.KeyCode;
 import arc.math.Mathf;
 import arc.scene.Element;
+import arc.scene.event.InputEvent;
+import arc.scene.event.InputListener;
 import arc.scene.event.Touchable;
 import arc.scene.style.Drawable;
 import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.*;
+import arc.scene.ui.layout.Cell;
 import arc.scene.ui.layout.Stack;
 import arc.scene.ui.layout.Table;
 import arc.struct.Seq;
-import arc.struct.StringMap;
-import arc.util.Nullable;
-import arc.util.Tmp;
+import arc.util.Log;
+import arc.util.Threads;
 import mindustry.Vars;
 import mindustry.content.Blocks;
-import mindustry.game.Schematic;
 import mindustry.gen.Icon;
 import mindustry.ui.Styles;
 import mindustry.ui.dialogs.BaseDialog;
@@ -28,37 +32,58 @@ import mindustry.world.blocks.logic.LogicBlock;
 import mindustry.world.blocks.logic.LogicDisplay;
 import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable;
 import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.Setting;
+import mindustry.world.blocks.logic.TileableLogicDisplay;
 
 import static arc.Core.settings;
 import static mindustry.Vars.ui;
 
 public class LogicImageDialog extends BaseDialog {
     Table reviewTable = new Table();
-    SettingsTable settingsTable = new SettingsTable();
+    SettingsTable settingsTable = new SettingsTable(){
+        final Cell empty = new Cell<>();
+
+        @Override
+        public <T extends Element> Cell<T> add(T element) {
+            if(element.getClass() == TextButton.class){
+                return empty;
+            }
+            return super.add(element);
+        }
+    };
 
     LogicBlock logicBlock = (LogicBlock) Blocks.microProcessor;
     LogicDisplay logicDisplay = (LogicDisplay) Blocks.logicDisplay;
     int widthAmount = 1, heightAmount = 1;
     boolean minScale = false;
-    boolean showGrid = false;
     boolean limit = false;
     boolean stopCompress = false;
+    int logicGap = 0;
     
     float imageSize = 300f;
 
     Pixmap image = new Pixmap(180,180);
     Pixmap afterScaling = new Pixmap(0,0);
     Pixmap afterCompressor = new Pixmap(0,0);
+    Pixmap allBlack = new Pixmap(1,1);
     Compressor compressor = Compressor.quadtree;
     ScalingAlgorithm algorithm = ScalingAlgorithm.nearest;
     String name = null;
 
+    private volatile boolean previewCancelled = false;
+    private Thread previewThread = null;
+    private volatile boolean previewProcessing = false;
+    private volatile long previewStartTime = 0;
+
+    private Label statusLabel;
+    private boolean updateListenerAdded = false;
+
     public LogicImageDialog() {
         super("逻辑图像");
 
+        allBlack.set(0, 0, Color.black);
         cont.add(reviewTable).row();
 
-        ScrollPane pane = new ScrollPane(settingsTable);
+        ScrollPane pane = new ScrollPane(settingsTable, Styles.noBarPane);
         pane.setOverscroll(false, false);
         pane.setScrollingDisabled(true, false);
         cont.add(pane);
@@ -78,12 +103,6 @@ public class LogicImageDialog extends BaseDialog {
             scaling();
         }));
 
-//        list.add(new NotSavedCheckSetting("显示网格", true, () -> showGrid, b -> {
-//            showGrid = b;
-//
-//            scaling();
-//        }));
-
         Seq<Selection<LogicBlock>> logicBlocks = new Seq<>();
         for (Block block : Vars.content.blocks().select(b -> b instanceof LogicBlock)) {
             logicBlocks.add(new Selection<>((LogicBlock) block, new TextureRegionDrawable(block.fullIcon), block.localizedName));
@@ -95,7 +114,7 @@ public class LogicImageDialog extends BaseDialog {
         ));
 
         Seq<Selection<LogicDisplay>> logicDisplays = new Seq<>();
-        for (Block block : Vars.content.blocks().select(b -> b instanceof LogicDisplay)) {
+        for (Block block : Vars.content.blocks().select(b -> b instanceof LogicDisplay && !(b instanceof TileableLogicDisplay))) {
             logicDisplays.add(new Selection<>((LogicDisplay) block, new TextureRegionDrawable(block.fullIcon), block.localizedName));
         }
         list.add(new SelectionSetting<>("逻辑画板类型",
@@ -109,25 +128,34 @@ public class LogicImageDialog extends BaseDialog {
 
         list.add(new SelectionSetting<>("色块化算法",
                 Seq.with(
-                        new Selection<>(Compressor.quadtree, Icon.move, "四叉树分割, 该算法存在的意义是凑数"),
+                        new Selection<>(Compressor.quadtree, Icon.move, "四叉树递归"),
                         new Selection<>(Compressor.maxRect, Icon.distribution, "最大矩形分割"),
-                        new Selection<>(Compressor.grow, Icon.logic, "贪婪生长")
+                        new Selection<>(Compressor.grow, Icon.logic, "贪婪生长"),
+                        new Selection<>(Compressor.delaunay, Icon.play, "三角剖分, 该算法会关闭预览图更新"),
+                        new Selection<>(Compressor.bestHillClimb, Icon.terrain, "爬山迭代拟合, 该算法会关闭预览图更新")
+
                 ),
                 () -> compressor,
                 c -> {
                     compressor = c;
+
+                    if(compressor == Compressor.delaunay || compressor == Compressor.bestHillClimb){
+                        stopCompress = true;
+                        return;
+                    }
+
                     scaling();
                 }
         ));
 
-        list.add(new DynamicLimitSliderSetting("色块容差", (int) Compressors.tolerance * 100,
+        list.add(new DynamicLimitSliderSetting("色块容差/逻辑数量", (int) Compressors.tolerance * 100,
                 () -> 0,
-                () -> 180,
+                () -> 100,
                 1,
                 i -> {
                     Compressors.tolerance = i / 100f;
                     scaling();
-                    return i + "%";
+                    return i + (compressor == Compressor.bestHillClimb ? "个" : "%");
                 }
         ));
 
@@ -168,21 +196,35 @@ public class LogicImageDialog extends BaseDialog {
                     return "" + i;
         }));
 
-        BaseDialog schematics = Vars.ui.schematics;
-        list.add(new ToggleCheckSetting("生成并保存", () -> {
-            scaling();
-            Compressors.setPixmap(afterScaling);
-            Compressors.compressor(logicDisplay, logicBlock, widthAmount, heightAmount, compressor, name);
-            schematics.hide();
-            schematics.show();
+        //todo 允许自定义X,Y轴的边长补偿, 让我偷个懒(?
+        list.add(new DynamicLimitSliderSetting("逻辑处理器边长补偿(存在部分问题,不想修)", 0,
+                () -> 0,
+                () -> logicBlock.size,
+                1,
+                i -> {
+                    logicGap = i;
+                    return "" + i;
+                }));
+
+        list.add(new ToggleCheckSetting("生成并保存蓝图", () -> {
+            generateBlueprintAsync(Vars.ui.schematics);
         }));
 
         settingsTable.rebuild();
-
         addCloseButton();
+        scaling();
     }
 
     void scaling(){
+        if(previewThread != null && previewThread.isAlive()){
+            previewCancelled = true;
+            try {
+                previewThread.join(5000);
+            } catch(InterruptedException ignored){
+            }
+        }
+        previewCancelled = false;
+        
         afterScaling.dispose();
         afterCompressor.dispose();
 
@@ -204,15 +246,78 @@ public class LogicImageDialog extends BaseDialog {
         else if(algorithm == ScalingAlgorithm.bilinear) Scaler.bilinearInterpolation(image, afterScaling);
 
         if(!stopCompress) {
-            compressPixmap(afterScaling, compressor);
-            afterCompressor = Compressors.decompressor();
+            // 异步执行压缩
+            previewProcessing = true;
+            previewStartTime = System.currentTimeMillis();
+            previewThread = Threads.daemon("PreviewGenerator", () -> {
+                try {
+                    compressPixmap(afterScaling, compressor);
+                    if(!previewCancelled){
+                        afterCompressor = Compressors.decompressor(compressor == Compressor.bestHillClimb);
+                        Core.app.post(this::refreshReviewImage);
+                    }
+                }finally {
+                    previewProcessing = false;
+                }
+            });
+        }else{
+            refreshReviewImage();
         }
-//        if(showGrid) {
-//            gridImage(afterScaling);
-//            //gridImage(afterCompressor);
-//        }
+    }
 
-        refreshReviewImage();
+    void generateBlueprintAsync(BaseDialog schematics){
+        scaling();
+        Compressors.setPixmap(afterScaling);
+
+        ui.loadfrag.setProgress(0f);
+        ui.loadfrag.show("正在生成蓝图...");
+        
+        final boolean[] cancelled = {false};
+
+        ui.loadfrag.setButton(() -> {
+            cancelled[0] = true;
+            ui.loadfrag.hide();
+        });
+        
+        Threads.thread("BlueprintGenerator", () -> {
+            try {
+                Compressors.compressorWithProgress(
+                    logicDisplay, 
+                    logicBlock, 
+                    widthAmount, 
+                    heightAmount, 
+                    compressor, 
+                    name,
+                    compressor == Compressor.bestHillClimb ? 60 : -1,
+                    logicGap,
+                        (show, progress) -> {
+                        if(!cancelled[0]){
+                            Core.app.post(() -> {
+                                ui.loadfrag.setProgress(progress);
+                                ui.loadfrag.setText(show);
+                            });
+                        }
+                    },
+                    () -> cancelled[0]
+                );
+                
+                if(!cancelled[0]){
+                    Core.app.post(() -> {
+                        ui.loadfrag.hide();
+                        schematics.hide();
+                        schematics.show();
+                    });
+                }
+            }catch(Exception e){
+                if(!cancelled[0]){
+                    Core.app.post(() -> {
+                        ui.loadfrag.hide();
+                        ui.showErrorMessage("蓝图生成失败：" + e.getMessage());
+                        Log.err(e);
+                    });
+                }
+            }
+        });
     }
 
     public static void compressPixmap(Pixmap pixmap, Compressor compressor){
@@ -221,35 +326,15 @@ public class LogicImageDialog extends BaseDialog {
         if(compressor == Compressor.quadtree) Compressors.quadtreeCompressor();
         else if(compressor == Compressor.maxRect) Compressors.maxRectCompress();
         else if(compressor == Compressor.grow) Compressors.growCompress();
-    }
-
-    public void gridImage(Pixmap pixmap){
-        for (int i = 0; i <= widthAmount; i++){
-            for (int j = 0; j < height; j++){
-                for (int k = -1; k <= 0; k++){
-                    int x = i * logicDisplay.displaySize + k;
-                    if (x >= width || x < 0)continue;
-                    pixmap.set(x, j, Tmp.c1.set(afterScaling.get(x, j)).hue(180).value(1).saturation(1));
-                }
-            }
-        }
-
-        for (int i = 0; i <= heightAmount; i++){
-            for (int j = 0; j < width; j++){
-                for (int k = -1; k <= 0; k++){
-                    int y = i * logicDisplay.displaySize + k;
-                    if (y >= height || y < 0)continue;
-                    pixmap.set(j, y, Tmp.c1.set(afterScaling.get(j, y)).hue(180).value(1).saturation(1));
-                }
-            }
-        }
+        else if(compressor == Compressor.delaunay) Compressors.triSplitCompress();
+        else if(compressor == Compressor.bestHillClimb) Compressors.bestHillClimb();
     }
 
     void refreshReviewImage(){
         reviewTable.clear();
+        updateListenerAdded = false; // 重置标志
 
         int before = afterScaling.width * afterScaling.height;
-        int after = Compressors.rectSize();
 
         if(Vars.mobile){
             Table imageTable = new Table();
@@ -261,20 +346,20 @@ public class LogicImageDialog extends BaseDialog {
             addImage(image, imageTable);
             imageTable.row();
 
-            addImage(afterScaling, imageTable);
+            addImage(stopCompress ? allBlack : afterScaling, imageTable);
             imageTable.add(before + "");
             imageTable.row();
 
             addImage(afterCompressor, imageTable);
-            imageTable.add(after + "(" + String.format("%.2f", after * 100f / before) + "%)");
+            statusLabel = imageTable.add("").get();
         }else {
             addImage(image, reviewTable);
             addImage(afterScaling, reviewTable);
-            addImage(afterCompressor, reviewTable);
+            addImage(stopCompress ? allBlack : afterCompressor, reviewTable);
         }
 
         reviewTable.row();
-        reviewTable.button("选择图片", () -> Vars.platform.showFileChooser(true, "png", f -> {
+        reviewTable.button("选择图片(png格式)", () -> Vars.platform.showFileChooser(true, "png", f -> {
             image.dispose();
             try {
                 image = PixmapIO.readPNG(f);
@@ -282,19 +367,43 @@ public class LogicImageDialog extends BaseDialog {
                 ui.showErrorMessage("无法读取文件");
             }
             scaling();
-        }));
+        })).width(100f);
 
         if(!Vars.mobile) {
             reviewTable.add(before + "");
-            reviewTable.add(after + "(" + String.format("%.2f", after * 100f / before) + "%)");
+            statusLabel = reviewTable.add("").get();
         }
+        
+        setupStatusLabelUpdate();
+    }
+    
+    void setupStatusLabelUpdate(){
+        if(statusLabel == null || updateListenerAdded) return;
+        
+        updateListenerAdded = true;
+        statusLabel.update(() -> {
+            if(stopCompress){
+                statusLabel.setText("已禁用更新");
+            }else if(previewProcessing){
+                long elapsed = System.currentTimeMillis() - previewStartTime;
+                statusLabel.setText("处理中... (" + (elapsed / 100)/10f + "s)");
+            }else if(updateListenerAdded){
+                // 编译完成，更新最终结果
+                int finalAfter = Compressors.rectSize();
+                int finalBefore = afterScaling.width * afterScaling.height;
+                statusLabel.setText(finalAfter + "(" + String.format("%.2f", finalAfter * 100f / finalBefore) + "%)");
+                // 移除更新监听器（通过设置标志）
+                updateListenerAdded = false;
+            }
+        });
     }
 
     void addImage(Pixmap pixmap, Table table){
+        float scale = imageSize / Math.max(pixmap.width, pixmap.height);
+        float w = pixmap.width * scale;
+        float h = pixmap.height * scale;
+
         TextureRegion region = new TextureRegion(new Texture(pixmap));
-        float scale = imageSize / Math.max(region.width, region.height);
-        float w = region.width * scale;
-        float h = region.height * scale;
         Element element = table.image(region).size(w, h).pad(15f).get();
         ui.addDescTooltip(element, pixmap.width + "×" + pixmap.height);
     }
@@ -411,9 +520,23 @@ public class LogicImageDialog extends BaseDialog {
             content.margin(3f, 33f, 3f, 33f);
             content.touchable = Touchable.disabled;
 
+            // 滑动过程中只更新数值显示，不触发 sp.get()
             slider.changed(() -> {
-                settings.put(name, (int)slider.getValue());
-                value.setText(sp.get((int)slider.getValue()));
+                value.setText(String.valueOf((int)slider.getValue()));
+            });
+
+            slider.addListener(new InputListener(){
+                @Override
+                public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
+                    return true; // 先返回 true 以接收后续的 touchUp 事件
+                }
+
+                @Override
+                public void touchUp(InputEvent event, float x, float y, int pointer, KeyCode button){
+                    // 只在松开时调用 sp.get() 并保存设置
+                    settings.put(name, (int)slider.getValue());
+                    value.setText(sp.get((int)slider.getValue()));
+                }
             });
 
             slider.change();
@@ -478,7 +601,7 @@ public class LogicImageDialog extends BaseDialog {
 
     //压缩
     public enum Compressor{
-        quadtree, maxRect, grow
+        quadtree, maxRect, grow, delaunay, bestHillClimb
     }
 
     //缩放

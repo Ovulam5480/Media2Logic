@@ -36,6 +36,7 @@ val androidMinVersion: String by project
 
 val useJitpack = property("mindustryBE").toString().toBooleanStrict()
 val gamePath: String by project
+val gamePathX: String by project
 
 fun arc(module: String): String{
     return "com.github.Anuken.Arc$module:$arcVersion"
@@ -206,5 +207,12 @@ project(":"){
 
         dependsOn("install")
         commandLine = listOf("cmd", "/c", "java", "-jar", gamePath)
+    }
+
+    tasks.register<Exec>("runGameX") {
+        group = "test in game"
+
+        dependsOn("install")
+        commandLine = listOf("cmd", "/c", "java", "-jar", gamePathX)
     }
 }
