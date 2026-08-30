@@ -84,8 +84,8 @@ allprojects{
     tasks.withType<JavaCompile>().configureEach{
         // Use Java 17+ syntax, but target Java 8 bytecode version.
         sourceCompatibility = "17"
+        targetCompatibility = "17"
         options.apply{
-            release = 8
             compilerArgs.add("-Xlint:-options")
 
             isIncremental = true

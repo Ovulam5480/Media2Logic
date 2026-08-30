@@ -103,7 +103,7 @@ import java.io.Serializable;
  */
 
 @SuppressWarnings("PMD")
-public strictfp final class DD
+public final class DD
   implements Serializable, Comparable<DD>, Cloneable
 {
   private static final long serialVersionUID = 1L;

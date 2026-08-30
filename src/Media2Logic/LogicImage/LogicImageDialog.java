@@ -24,7 +24,7 @@ import arc.util.Threads;
 import mindustry.Vars;
 import mindustry.content.Blocks;
 import mindustry.gen.Icon;
-import mindustry.ui.Styles;
+import mindustry.ui.*;
 import mindustry.ui.dialogs.BaseDialog;
 import mindustry.ui.dialogs.SettingsMenuDialog;
 import mindustry.world.Block;
@@ -359,7 +359,7 @@ public class LogicImageDialog extends BaseDialog {
         }
 
         reviewTable.row();
-        reviewTable.button("选择图片(png格式)", () -> Vars.platform.showFileChooser(true, "png", f -> {
+        reviewTable.button("选择图片(png格式)", () -> FileChooser.open("png").submit(f -> {
             image.dispose();
             try {
                 image = PixmapIO.readPNG(f);

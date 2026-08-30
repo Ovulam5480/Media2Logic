@@ -3,7 +3,7 @@
     "name": "mod",
     "description": "图片转逻辑模组, 图片只支持png格式 \n蓝图生成完成后请及时重启游戏, 释放内存 \n三角剖分低多边形算法思路来源于nce3xin, 三角剖分算法实现使用Tinfour库, \n爬山算法使用Geometrize库的思路",
     "version": "1.0",
-    "minGameVersion": "155",
+    "minGameVersion": "159.7",
     "author": "Ovulam5480",
     "java": true,
     "main": "Media2Logic.Media2LogicMod",
